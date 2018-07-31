@@ -1,0 +1,20 @@
+{
+    "name": "zenexer/tg-userbot",
+    "type": "project",
+	"minimum-stability": "dev",
+	"prefer-stable": true,
+	"repositories": [
+		{
+			"type": "vcs",
+			"url": "https://github.com/danog/phpseclib.git"
+		}
+	],
+    "require": {
+        "danog/madelineproto": "^3.1"
+    },
+	"autoload": {
+		"psr-4": {
+			"Zenexer\\Telegram\\Bot\\": "src/"
+		}
+	}
+}
