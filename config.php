@@ -11,7 +11,7 @@ return [
 		'pwr' => ['pwr' => false],  // IMPORTANT!
 		'logger' => [
 			'logger_param' => __DIR__ . '/MadelineProto.log',
-			'logger_level' => Logger::WARNING,
+			'logger_level' => Logger::ERROR,
 		],
 	],
 	'owner' => '@Zenexer',
