@@ -10,7 +10,7 @@ use danog\MadelineProto\Logger;
 
 class App
 {
-	public const DRY_RUN = true;
+	public const DRY_RUN = false;
 
 	/** @var self */
 	private static $instance;
@@ -200,7 +200,7 @@ class App
 			/** @var array $users */
 			$users = array_column($pwr['participants'], 'user');
 			$this->checkUsers($channel, $channelId, $users);
-			echo "Users in channel#$channelId: ", implode(', ', array_column($users, 'first_name')), PHP_EOL;
+			//echo "Users in channel#$channelId: ", implode(', ', array_column($users, 'first_name')), PHP_EOL;
 		}
 
 		try {
