@@ -10,8 +10,6 @@ use danog\MadelineProto\Logger;
 
 class App
 {
-	public const DRY_RUN = false;
-
 	/** @var self */
 	private static $instance;
 
@@ -68,6 +66,13 @@ class App
 		Logger::log(...$args);
 	}
 
+	public function isDryRun(): bool
+	{
+		/** @var array $config */
+		$config = $this->getConfig();
+		return (bool) $config['dryRun'];
+	}
+
 	/**
 	 * @return int[]
 	 */
@@ -93,6 +98,20 @@ class App
 		}
 	}
 
+	public function notify(string $message): void
+	{
+		/** @var array $config */
+		$config = $this->getConfig();
+
+		echo "NOTIFY: ", $message, PHP_EOL;
+
+		if ($config['notifyOwner']) {
+			/** @var API $api */
+			$api = $this->getApi();
+			$api->messages->sendMessage(['peer' => $config['owner'], 'message' => $message]);
+		}
+	}
+
 	public function shutdown(bool $save = true): void
 	{
 		if ($save) {
@@ -100,21 +119,7 @@ class App
 			$this->save();
 		}
 
-		/** @var array $config */
-		$config = $this->getConfig();
-		if ($config['notifyOwner']) {
-			try {
-				echo "Notifying owner of shutdown...", PHP_EOL;
-
-				/** @var API $api */
-				$api = $this->getApi();
-				$api->messages->sendMessage(['peer' => $config['owner'], 'message' => "Shutting down."]);
-			} catch (Throwable $ex) {
-				echo "Error notifying owner of shutdown: $ex", PHP_EOL;
-			}
-		}
-
-		echo "Shutting down...", PHP_EOL;
+		$this->notify('Bot is shutting down.');
 		exit;
 	}
 
@@ -161,9 +166,7 @@ class App
 
 		$api->setEventHandler(EventHandler::class);
 
-		if ($config['notifyOwner']) {
-			$api->messages->sendMessage(['peer' => $config['owner'], 'message' => "Bot online."]);
-		}
+		$this->notify('Bot online.');
 
 		pcntl_async_signals(true);
 		/** @var int $signo */
@@ -175,32 +178,34 @@ class App
 		
 		$this->save();
 
-		/** @var array<int> $adminedChannels */
-		$adminedChannels = [];
+		if ($config['scanOnStart']) {
+			/** @var array<int> $adminedChannels */
+			$adminedChannels = [];
 
-		/** @var int $id */
-		/** @var array $chat */
-		foreach ($api->API->chats as $id => $chat) {
-			switch ($chat['_']) {
-				case 'channel':
-					if (isset($chat['admin_rights']) && !empty($chat['admin_rights']['delete_messages']) && !empty($chat['admin_rights']['ban_users'])) {
-						$adminedChannels[$id] = [
-							'channel' => $chat,
-							'pwr' => $api->get_pwr_chat($chat, true, false),
-						];
-					}
-					break;
+			/** @var int $id */
+			/** @var array $chat */
+			foreach ($api->API->chats as $id => $chat) {
+				switch ($chat['_']) {
+					case 'channel':
+						if (isset($chat['admin_rights']) && !empty($chat['admin_rights']['delete_messages']) && !empty($chat['admin_rights']['ban_users'])) {
+							$adminedChannels[$id] = [
+								'channel' => $chat,
+								'pwr' => null //$api->get_pwr_chat($chat, true, false),
+							];
+						}
+						break;
+				}
 			}
-		}
 
-		/** @var int $channelId */
-		/** @var array $channel */
-		/** @var array $pwr */
-		foreach ($adminedChannels as $channelId => ['channel' => $channel, 'pwr' => $pwr]) {
-			/** @var array $users */
-			$users = array_column($pwr['participants'], 'user');
-			$this->checkUsers($channel, $channelId, $users);
-			//echo "Users in channel#$channelId: ", implode(', ', array_column($users, 'first_name')), PHP_EOL;
+			/** @var int $channelId */
+			/** @var array $channel */
+			/** @var array $pwr */
+			foreach ($adminedChannels as $channelId => ['channel' => $channel, 'pwr' => $pwr]) {
+				/** @var array $users */
+				$users = array_column($pwr['participants'], 'user');
+				$this->checkUsers($channel, $channelId, $users);
+				//echo "Users in channel#$channelId: ", implode(', ', array_column($users, 'first_name')), PHP_EOL;
+			}
 		}
 
 		try {
@@ -221,6 +226,14 @@ class App
 	private function getBadNames(): array
 	{
 		return array_flip($this->getConfig()['badNames']);
+	}
+
+	/**
+	 * @return string[]
+	 */
+	private function getBadNameRegexes(): array
+	{
+		return $this->getConfig()['badNameRegexes'];
 	}
 
 	/**
@@ -259,28 +272,53 @@ class App
 		$now = time();
 		/** @var array<string, int> $badNames */
 		$badNames = $this->getBadNames();
+		/** @var string[] $badNameRegexes */
+		$badNameRegexes = $this->getBadNameRegexes();
 		/** @var API $api */
 		$api = $this->getApi();
 
 		/** @var int $user */
 		foreach ($users as $user) {
-			if (array_key_exists($user['first_name'] ?? '', $badNames) || array_key_exists($user['last_name'] ?? '', $badNames)) {
+			/** @var bool $bad */
+			$bad = false;
+			/** @var string[] $reasons */
+			$reasons = [];
+			/** @var array<string, string> $testVals */
+			$testVals = [];
+
+			/** @var string $field */
+			foreach ($config['testFields'] as $field) {
+				if (isset($user[$field])) {
+					$testVals[$field] = $user[$field];
+				}
+			}
+
+			/** @var string $field */
+			/** @var string $val */
+			foreach ($testVals as $field => $val) {
+				if (array_key_exists($val, $badNames)) {
+					$bad = true;
+					$reasons[] = "$field is a blacklisted name";
+				}
+
+				/** @var string $regex */
+				foreach ($badNameRegexes as $regex) {
+					if (preg_match($regex, $val)) {
+						$bad = true;
+						$reasons[] = "$field matches regex $regex";
+					}
+				}
+			}
+
+			if ($bad) {
 				/** @var int $userId */
 				$userId = $user['id'];
 
-				echo "Kicking user#$userId from channel#$channelId", PHP_EOL;
+				/** @var string $displayUsername */
+				$displayUsername = isset($user['username']) ? '@' . $user['username'] : 'no username';
+				$this->notify("Banning user#$userId ($displayUsername) from channel#$channelId\nReason(s):\n - " . implode("\n - ", $reasons));
 
-				if (!empty($messageIds[$userId]) || !empty($messageIds[''])) {
-					/** @var int[] $messageIds */
-					$messageIds = array_unique(array_merge($messageIds[$userId] ?? [], $messageIds[''] ?? []));
-					echo "Deleting messages: ", implode(', ', $messageIds), PHP_EOL;
-					if (!self::DRY_RUN) {
-						$api->channels->deleteMessages(['channel' => $inputChannel, 'id' => $messageIds]);
-					}
-				}
-
-				echo "Banning user: $userId (", $user['first_name'] ?? '', ' ', $user['last_name'], ")", PHP_EOL;
-				if (!self::DRY_RUN) {
+				if (!$this->isDryRun()) {
 					$api->channels->editBanned([
 						'channel' => $inputChannel,
 						'user_id' => $userId,
@@ -297,6 +335,19 @@ class App
 							'until_date'    => 0,
 						]
 					]);
+				}
+
+				if (!empty($messageIds[$userId]) || !empty($messageIds[''])) {
+					if ($config['deleteDelay']) {
+						sleep((int) $config['deleteDelay']);
+					}
+
+					/** @var int[] $messageIds */
+					$messageIds = array_unique(array_merge($messageIds[$userId] ?? [], $messageIds[''] ?? []));
+					$this->notify("Deleting messages from channel#$channelId: " . implode(', ', $messageIds));
+					if (!$this->isDryRun()) {
+						$api->channels->deleteMessages(['channel' => $inputChannel, 'id' => $messageIds]);
+					}
 				}
 			}
 		}
