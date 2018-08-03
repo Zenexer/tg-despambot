@@ -276,6 +276,8 @@ class App
 		$badNameRegexes = $this->getBadNameRegexes();
 		/** @var API $api */
 		$api = $this->getApi();
+		/** @var array $config */
+		$config = $this->getConfig();
 
 		/** @var int $user */
 		foreach ($users as $user) {
