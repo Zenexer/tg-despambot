@@ -256,7 +256,7 @@ class App
 		try {
 			// Only notify if there wasn't an exception; otherwise, we've already notified.
 			if ($exception === null) {
-				$this->notify($notification);
+				$this->notify("Bot online.");
 			} else {
 				// We know the exception has been reported by this point, so clear it.
 				$exception = null;
