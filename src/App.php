@@ -248,6 +248,9 @@ class App
 	 */
 	private function runOnce(?Throwable &$exception = null): bool
 	{
+		/** @var API $api */
+		$api = $this->getApi();
+
 		if ($exception !== null) {
 			// Perform this notification outside the main try-catch.  That way, if we encounter repeated exceptions (e.g., due to loss of connectivity), when the notification finally goes through, the initial exception will be reported.
 			$this->notify("Bot restarted due to an unrecoverable exception:\n{$exception->getMessage()}");
