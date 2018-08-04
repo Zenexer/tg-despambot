@@ -14,6 +14,9 @@ class App
 	private const RETRY_EXCEPTION_PREFIXES = [
 		'Could not connect to DC ',
 	];
+	private const RETRY_EXCEPTION_MATCHES = [
+		'socket_connect(): unable to connect [',
+	];
 
 	/** @var self */
 	private static $instance;
@@ -268,6 +271,13 @@ class App
 			/** @var string $prefix */
 			foreach (self::RETRY_EXCEPTION_PREFIXES as $prefix) {
 				if (substr_compare($message, $prefix, 0, strlen($prefix)) === 0) {
+					return true;
+				}
+			}
+
+			/** @var string $match */
+			foreach (self::RETRY_EXCEPTION_MATCHES as $match) {
+				if (strpos($message, $match) !== false) {
 					return true;
 				}
 			}
