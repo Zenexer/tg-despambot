@@ -6,7 +6,7 @@ namespace Zenexer\Telegram\Bot;
 use danog\MadelineProto\Logger;
 
 return [
-	'dryRun' => true,
+	'dryRun' => false,
 	'sessionFile' => __DIR__ . '/session.madeline',
 	'apiSettings' => [
 		'pwr' => ['pwr' => false],  // IMPORTANT!
