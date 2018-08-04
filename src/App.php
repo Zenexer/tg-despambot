@@ -7,9 +7,14 @@ use Throwable;
 use RuntimeException;
 use danog\MadelineProto\API;
 use danog\MadelineProto\Logger;
+use danog\MadelineProto\Exception as MadelineException;
 
 class App
 {
+	private const RETRY_EXCEPTION_PREFIXES = [
+		'Could not connect to DC ',
+	];
+
 	/** @var self */
 	private static $instance;
 
@@ -19,6 +24,8 @@ class App
 	private $config;
 	/** @var array */
 	private $me;
+	/** @var bool */
+	private $shuttingDown = false;
 
 	public function __construct(array $config)
 	{
@@ -114,12 +121,22 @@ class App
 
 	public function shutdown(bool $save = true): void
 	{
+		if ($this->shuttingDown) {
+			return;
+		}
+		$this->shuttingDown = true;
+
 		if ($save) {
 			echo "Performing final save before shutting down...", PHP_EOL;
 			$this->save();
 		}
 
-		$this->notify('Bot is shutting down.');
+		try {
+			$this->notify('Bot is shutting down.');
+		} catch (Throwable $ex) {
+			echo "Failed to notify bot owner of shutdown: ", $ex->getMessage(), PHP_EOL;
+		}
+
 		exit;
 	}
 
@@ -166,8 +183,6 @@ class App
 
 		$api->setEventHandler(EventHandler::class);
 
-		$this->notify('Bot online.');
-
 		pcntl_async_signals(true);
 		/** @var int $signo */
 		foreach ($this->getHandledSignals() as $signo) {
@@ -209,15 +224,60 @@ class App
 		}
 
 		try {
-			$api->loop();
-			echo "Exited loop cleanly.", PHP_EOL;
-		} catch (Throwable $ex) {
-			echo "Fatal exception:", PHP_EOL;
-			echo $ex, PHP_EOL;
+			/** @var Throwable|null $ex Stores an exception across calls to runOnce. */
+			$ex = null;
+
+			while ($this->runOnce($ex)) {
+				echo "Re-run requested.", PHP_EOL;
+			}
 		} finally {
-			echo "Exited loop.", PHP_EOL;
-			$this->shutdown(true);
+			try {
+				$this->shutdown(true);
+			} catch (Throwable $ex) {
+				echo "Failed to shut down cleanly: ", $ex->getMessage(), PHP_EOL;
+			}
 		}
+	}
+
+	/**
+	 * @param Throwable|null &$exception Stores an excpetion across calls.
+	 * @return bool true to request a re-run; otherwise, false. Used to recover from otherwise-fatal errors such as connectivity loss.
+	 */
+	private function runOnce(?Throwable &$exception = null): bool
+	{
+		if ($exception !== null) {
+			// Perform this notification outside the main try-catch.  That way, if we encounter repeated exceptions (e.g., due to loss of connectivity), when the notification finally goes through, the initial exception will be reported.
+			$this->notify("Bot restarted due to an unrecoverable exception:\n{$exception->getMessage()}");
+		}
+
+		try {
+			// Only notify if there wasn't an exception; otherwise, we've already notified.
+			if ($exception === null) {
+				$this->notify($notification);
+			} else {
+				// We know the exception has been reported by this point, so clear it.
+				$exception = null;
+			}
+
+			$api->loop();
+		} catch (MadelineException $ex) {
+			$exception = $ex;
+			/** @var string $message */
+			$message = $ex->getMessage();
+			
+			/** @var string $prefix */
+			foreach (self::RETRY_EXCEPTION_PREFIXES as $prefix) {
+				if (substr_compare($message, $prefix, 0, strlen($prefix)) === 0) {
+					return true;
+				}
+			}
+		} catch (Throwable $ex) {
+			$exception = $ex;
+		}
+
+		echo "Fatal exception:", PHP_EOL, $exception, PHP_EOL;
+
+		return false;
 	}
 
 	/**
